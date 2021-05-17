@@ -603,6 +603,28 @@ func (cs *ConstraintSystem) mustBeLessOrEqCst(v Variable, bound big.Int) {
 	}
 }
 
+// Conditional ... WIP helper struct to chain IF ELSE statements.
+type Conditional struct {
+	cs        *ConstraintSystem
+	predicate Variable
+}
+
+// If ... WIP
+func (cs *ConstraintSystem) If(predicate Variable, lambda func()) *Conditional {
+	cs.completeDanglingVariable(&predicate)
+
+	// ensures that predicate is boolean
+	cs.AssertIsBoolean(predicate)
+
+	conditional := &Conditional{cs, predicate}
+
+	cs.branches = append(cs.branches, predicate)
+	lambda()
+	cs.branches = cs.branches[:len(cs.branches)-1]
+
+	return conditional
+}
+
 // Println enables circuit debugging and behaves almost like fmt.Println()
 //
 // the print will be done once the R1CS.Solve() method is executed

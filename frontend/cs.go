@@ -64,6 +64,9 @@ type ConstraintSystem struct {
 	debugInfo      []logEntry // list of logs storing information about assertions. If an assertion fails, it prints it in a friendly format
 	unsetVariables []logEntry // unset variables. If a variable is unset, the error is caught when compiling the circuit
 
+	// branches predicates to apply, if any
+	// this is treated as LIFO queue, and used by the cs.If API
+	branches []Variable
 }
 
 // CompiledConstraintSystem ...
@@ -106,6 +109,8 @@ func newConstraintSystem() ConstraintSystem {
 
 	// by default the circuit is given on public wire equal to 1
 	cs.public.variables[0] = cs.newPublicVariable()
+
+	cs.branches = make([]Variable, 0)
 
 	return cs
 }
@@ -265,9 +270,68 @@ func (cs *ConstraintSystem) reduce(l compiled.LinearExpression) compiled.LinearE
 }
 
 func (cs *ConstraintSystem) addAssertion(constraint compiled.R1C, debugInfo logEntry) {
+	// if we're not in a branch
+	if len(cs.branches) == 0 {
+		cs.debugInfo = append(cs.debugInfo, debugInfo)
+		cs.assertions = append(cs.assertions, constraint)
+		return
+	}
 
-	cs.assertions = append(cs.assertions, constraint)
+	// we're in a branch
+	// TODO @thomas
+	// idea (WIP)
+	// 1. compute a AND between the predicates. this should not create new constraints
+	// 2. replace a * b == c  by a * b * p = c * p (that doesn't work for all cases, and adds useless constraints)
+
+	var predicate Variable
+	if len(cs.branches) == 1 {
+		predicate = cs.branches[0]
+	} else if len(cs.branches) == 2 {
+		predicate = cs.Mul(cs.branches[0], cs.branches[1])
+	} else {
+		predicate = cs.Mul(cs.branches[0], cs.branches[1], cs.branches[2:])
+	}
+
+	var bp, cp Variable
+
+	bp.linExp = constraint.R
+	cp.linExp = constraint.O
+
+	bp = cs.Mul(bp, predicate)
+	cp = cs.Mul(cp, predicate)
+
+	constraint.R = bp.linExp
+	constraint.O = cp.linExp
+
+	pinfo := cs.buildLogEntryFromVariable(predicate)
+	debugInfo.format = "if(" + pinfo.format + ") --> "
+	debugInfo.toResolve = pinfo.toResolve
+	l := cs.buildLogEntryFromLinearExp(constraint.L)
+	r := cs.buildLogEntryFromLinearExp(constraint.R)
+	o := cs.buildLogEntryFromLinearExp(constraint.O)
+	debugInfo.format += "L (" + l.format + " ) * R ("
+	debugInfo.format += r.format + " ) = O ( "
+	debugInfo.format += o.format + " )"
+	debugInfo.toResolve = append(debugInfo.toResolve, l.toResolve...)
+	debugInfo.toResolve = append(debugInfo.toResolve, r.toResolve...)
+	debugInfo.toResolve = append(debugInfo.toResolve, o.toResolve...)
 	cs.debugInfo = append(cs.debugInfo, debugInfo)
+	cs.assertions = append(cs.assertions, constraint)
+}
+
+func (cs *ConstraintSystem) buildLogEntryFromLinearExp(linExp compiled.LinearExpression) logEntry {
+
+	var res logEntry
+
+	for i := 0; i < len(linExp); i++ {
+		if i > 0 {
+			res.format += " + "
+		}
+		c := cs.coeffs[linExp[i].CoeffID()]
+		res.format += fmt.Sprintf("(%%s * %s)", c.String())
+	}
+	res.toResolve = linExp.Clone()
+	return res
 }
 
 // coeffID tries to fetch the entry where b is if it exits, otherwise appends b to
