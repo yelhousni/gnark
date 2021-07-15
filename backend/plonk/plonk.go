@@ -129,17 +129,12 @@ func Prove(ccs frontend.CompiledConstraintSystem, pk ProvingKey, fullWitness fro
 		}
 		return plonk_bls24315.Prove(tccs, pk.(*plonk_bls24315.ProvingKey), w)
 
-	case *backend_bw6633.SparseR1CS:
-		_publicData := publicData.(*plonkbw6633.PublicRaw)
-		w := bw6633witness.Witness{}
+	case *cs_bw6633.SparseR1CS:
+		w := witness_bw6633.Witness{}
 		if err := w.FromFullAssignment(fullWitness); err != nil {
 			return nil, err
 		}
-		proof, err := plonkbw6633.ProveRaw(_sparseR1cs, _publicData, w)
-		if err != nil {
-			return proof, err
-		}
-		return proof, nil
+		return plonk_bw6633.Prove(tccs, pk.(*plonk_bw6633.ProvingKey), w)
 
 	default:
 		panic("unrecognized R1CS curve type")
@@ -186,13 +181,12 @@ func Verify(proof Proof, vk VerifyingKey, publicWitness frontend.Circuit) error 
 		}
 		return plonk_bls24315.Verify(_proof, vk.(*plonk_bls24315.VerifyingKey), w)
 
-	case *plonkbw6633.ProofRaw:
-		_publicData := publicData.(*plonkbw6633.PublicRaw)
-		w := bw6633witness.Witness{}
+	case *plonk_bw6633.Proof:
+		w := witness_bw6633.Witness{}
 		if err := w.FromPublicAssignment(publicWitness); err != nil {
 			return err
 		}
-		return plonkbw6633.VerifyRaw(_proof, _publicData, w)
+		return plonk_bw6633.Verify(_proof, vk.(*plonk_bw6633.VerifyingKey), w)
 
 	default:
 		panic("unrecognized proof type")

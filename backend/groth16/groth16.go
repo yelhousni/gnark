@@ -164,6 +164,12 @@ func ReadAndVerify(proof Proof, vk VerifyingKey, publicWitness io.Reader) error 
 			return err
 		}
 		return groth16_bls24315.Verify(proof.(*groth16_bls24315.Proof), _vk, w)
+	case *groth16_bw6633.VerifyingKey:
+		w := witness_bw6633.Witness{}
+		if _, err := w.LimitReadFrom(publicWitness, vk.SizePublicWitness()); err != nil {
+			return err
+		}
+		return groth16_bw6633.Verify(proof.(*groth16_bw6633.Proof), _vk, w)
 	default:
 		panic("unrecognized R1CS curve type")
 	}
@@ -394,6 +400,8 @@ func NewProvingKey(curveID ecc.ID) ProvingKey {
 		pk = &groth16_bw6761.ProvingKey{}
 	case ecc.BLS24_315:
 		pk = &groth16_bls24315.ProvingKey{}
+	case ecc.BW6_633:
+		pk = &groth16_bw6633.ProvingKey{}
 	default:
 		panic("not implemented")
 	}
@@ -415,6 +423,8 @@ func NewVerifyingKey(curveID ecc.ID) VerifyingKey {
 		vk = &groth16_bw6761.VerifyingKey{}
 	case ecc.BLS24_315:
 		vk = &groth16_bls24315.VerifyingKey{}
+	case ecc.BW6_633:
+		vk = &groth16_bw6633.VerifyingKey{}
 	default:
 		panic("not implemented")
 	}
@@ -437,6 +447,8 @@ func NewProof(curveID ecc.ID) Proof {
 		proof = &groth16_bw6761.Proof{}
 	case ecc.BLS24_315:
 		proof = &groth16_bls24315.Proof{}
+	case ecc.BW6_633:
+		proof = &groth16_bw6633.Proof{}
 	default:
 		panic("not implemented")
 	}
