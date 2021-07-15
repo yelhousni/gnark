@@ -125,6 +125,13 @@ func IsSolved(ccs frontend.CompiledConstraintSystem, witness frontend.Circuit) e
 			return err
 		}
 		return tccs.IsSolved(w)
+	case *cs_bw6633.SparseR1CS:
+		w := witness_bw6633.Witness{}
+		if err := w.FromFullAssignment(witness); err != nil {
+			return err
+		}
+		return tccs.IsSolved(w)
+
 	default:
 		panic("unknown constraint system type")
 	}
@@ -162,6 +169,9 @@ func newKZGSrs(ccs frontend.CompiledConstraintSystem) interface{} {
 	case *cs_bls24315.SparseR1CS:
 		size := len(tccs.Constraints) + len(tccs.Assertions) + tccs.NbPublicVariables
 		return kzg_bls24315.NewSRS(nextPowerOfTwo(size), fakeRandomness)
+	case *cs_bw6633.SparseR1CS:
+		size := len(tccs.Constraints) + len(tccs.Assertions) + tccs.NbPublicVariables
+		return kzg_bw6633.NewSRS(nextPowerOfTwo(size), fakeRandomness)
 	default:
 		panic("unknown constraint system type")
 	}

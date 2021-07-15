@@ -29,6 +29,8 @@ import (
 	witness_bls24315 "github.com/consensys/gnark/internal/backend/bls24-315/witness"
 	backend_bn254 "github.com/consensys/gnark/internal/backend/bn254/cs"
 	witness_bn254 "github.com/consensys/gnark/internal/backend/bn254/witness"
+	backend_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/cs"
+	witness_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/witness"
 	backend_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/cs"
 	witness_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/witness"
 	gnarkio "github.com/consensys/gnark/io"
@@ -179,6 +181,13 @@ func IsSolved(r1cs frontend.CompiledConstraintSystem, witness frontend.Circuit) 
 			return err
 		}
 		return _r1cs.IsSolved(w)
+	case *backend_bw6633.R1CS:
+		w := witness_bw6633.Witness{}
+		if err := w.FromFullAssignment(witness); err != nil {
+			return err
+		}
+		return _r1cs.IsSolved(w)
+
 	default:
 		panic("unrecognized R1CS curve type")
 	}

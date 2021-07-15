@@ -14,6 +14,7 @@ import (
 	frbls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	frbls24315 "github.com/consensys/gnark-crypto/ecc/bls24-315/fr"
 	frbn254 "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	frbw6633 "github.com/consensys/gnark-crypto/ecc/bw6-633/fr"
 	frbw6761 "github.com/consensys/gnark-crypto/ecc/bw6-761/fr"
 )
 
@@ -157,15 +158,18 @@ func (cs *ConstraintSystem) shuffleVariables(seed int64, withConstant bool) []in
 		v = append(v, frbn254.Modulus())
 		v = append(v, frbw6761.Modulus())
 		v = append(v, frbls24315.Modulus())
+		v = append(v, frbw6633.Modulus())
 		v = append(v, new(big.Int).Sub(frbls12377.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Sub(frbls12381.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Sub(frbn254.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Sub(frbw6761.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Sub(frbls24315.Modulus(), new(big.Int).SetUint64(1)))
+		v = append(v, new(big.Int).Sub(frbw6633.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Add(frbls12377.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Add(frbls12381.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Add(frbn254.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Add(frbw6761.Modulus(), new(big.Int).SetUint64(1)))
+		v = append(v, new(big.Int).Add(frbw6633.Modulus(), new(big.Int).SetUint64(1)))
 		v = append(v, new(big.Int).Add(frbls24315.Modulus(), new(big.Int).SetUint64(1)))
 	}
 

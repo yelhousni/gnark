@@ -26,24 +26,28 @@ import (
 	cs_bls12381 "github.com/consensys/gnark/internal/backend/bls12-381/cs"
 	cs_bls24315 "github.com/consensys/gnark/internal/backend/bls24-315/cs"
 	cs_bn254 "github.com/consensys/gnark/internal/backend/bn254/cs"
+	cs_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/cs"
 	cs_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/cs"
 
 	plonk_bls12377 "github.com/consensys/gnark/internal/backend/bls12-377/plonk"
 	plonk_bls12381 "github.com/consensys/gnark/internal/backend/bls12-381/plonk"
 	plonk_bls24315 "github.com/consensys/gnark/internal/backend/bls24-315/plonk"
 	plonk_bn254 "github.com/consensys/gnark/internal/backend/bn254/plonk"
+	plonk_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/plonk"
 	plonk_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/plonk"
 
 	witness_bls12377 "github.com/consensys/gnark/internal/backend/bls12-377/witness"
 	witness_bls12381 "github.com/consensys/gnark/internal/backend/bls12-381/witness"
 	witness_bls24315 "github.com/consensys/gnark/internal/backend/bls24-315/witness"
 	witness_bn254 "github.com/consensys/gnark/internal/backend/bn254/witness"
+	witness_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/witness"
 	witness_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/witness"
 
 	kzg_bls12377 "github.com/consensys/gnark-crypto/ecc/bls12-377/fr/kzg"
 	kzg_bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381/fr/kzg"
 	kzg_bls24315 "github.com/consensys/gnark-crypto/ecc/bls24-315/fr/kzg"
 	kzg_bn254 "github.com/consensys/gnark-crypto/ecc/bn254/fr/kzg"
+	kzg_bw6633 "github.com/consensys/gnark-crypto/ecc/bw6-633/fr/kzg"
 	kzg_bw6761 "github.com/consensys/gnark-crypto/ecc/bw6-761/fr/kzg"
 )
 
@@ -79,10 +83,11 @@ func Setup(ccs frontend.CompiledConstraintSystem, kzgSRS interface{}) (ProvingKe
 		return plonk_bw6761.Setup(tccs, kzgSRS.(*kzg_bw6761.SRS))
 	case *cs_bls24315.SparseR1CS:
 		return plonk_bls24315.Setup(tccs, kzgSRS.(*kzg_bls24315.SRS))
+	case *cs_bw6633.SparseR1CS:
+		return plonk_bw6633.Setup(tccs, kzgSRS.(*kzg_bw6633.SRS))
 	default:
 		panic("unrecognized R1CS curve type")
 	}
-
 }
 
 // Prove generates PLONK proof from a circuit, associated preprocessed public data, and the witness
@@ -123,6 +128,18 @@ func Prove(ccs frontend.CompiledConstraintSystem, pk ProvingKey, fullWitness fro
 			return nil, err
 		}
 		return plonk_bls24315.Prove(tccs, pk.(*plonk_bls24315.ProvingKey), w)
+
+	case *backend_bw6633.SparseR1CS:
+		_publicData := publicData.(*plonkbw6633.PublicRaw)
+		w := bw6633witness.Witness{}
+		if err := w.FromFullAssignment(fullWitness); err != nil {
+			return nil, err
+		}
+		proof, err := plonkbw6633.ProveRaw(_sparseR1cs, _publicData, w)
+		if err != nil {
+			return proof, err
+		}
+		return proof, nil
 
 	default:
 		panic("unrecognized R1CS curve type")
@@ -168,6 +185,14 @@ func Verify(proof Proof, vk VerifyingKey, publicWitness frontend.Circuit) error 
 			return err
 		}
 		return plonk_bls24315.Verify(_proof, vk.(*plonk_bls24315.VerifyingKey), w)
+
+	case *plonkbw6633.ProofRaw:
+		_publicData := publicData.(*plonkbw6633.PublicRaw)
+		w := bw6633witness.Witness{}
+		if err := w.FromPublicAssignment(publicWitness); err != nil {
+			return err
+		}
+		return plonkbw6633.VerifyRaw(_proof, _publicData, w)
 
 	default:
 		panic("unrecognized proof type")

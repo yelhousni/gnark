@@ -32,6 +32,7 @@ import (
 	frbls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	frbls24315 "github.com/consensys/gnark-crypto/ecc/bls24-315/fr"
 	frbn254 "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	frbw6633 "github.com/consensys/gnark-crypto/ecc/bw6-633/fr"
 	frbw6761 "github.com/consensys/gnark-crypto/ecc/bw6-761/fr"
 )
 
@@ -293,6 +294,8 @@ func (cs *ConstraintSystem) IsZero(a Variable, id ecc.ID) Variable {
 		expo.Set(frbw6761.Modulus())
 	case ecc.BLS24_315:
 		expo.Set(frbls24315.Modulus())
+	case ecc.BW6_633:
+		expo.Set(frbw6633.Modulus())
 	default:
 		panic("not implemented")
 	}
