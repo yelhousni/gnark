@@ -23,9 +23,8 @@ import (
 
 	"github.com/consensys/gnark/internal/backend/bw6-633/cs"
 
-	"github.com/consensys/gnark-crypto/ecc/bw6-633/fr/fft"
-
 	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/consensys/gnark-crypto/ecc/bw6-633/fr/fft"
 	"math/big"
 	"math/bits"
 )
