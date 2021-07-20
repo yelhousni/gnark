@@ -33,6 +33,7 @@ import (
 	"github.com/consensys/gnark/internal/backend/bls12-377/cs"
 
 	"github.com/consensys/gnark-crypto/fiat-shamir"
+	"github.com/consensys/gnark/internal/utils"
 )
 
 type Proof struct {
@@ -466,46 +467,36 @@ func evalIDCosets(pk *ProvingKey) (id, uid, uuid polynomial.Polynomial) {
 
 	// evaluation of id, uid, u**id on the cosets
 	id = make([]fr.Element, 4*pk.DomainNum.Cardinality)
-	c := int(pk.DomainNum.Cardinality)
-	id[0].SetOne()
-	id[1].SetOne()
-	id[2].SetOne()
-	id[3].SetOne()
-	for i := 1; i < c; i++ {
-		id[4*i].Mul(&id[4*(i-1)], &pk.DomainNum.Generator)
-		id[4*i+1] = id[4*i]
-		id[4*i+2] = id[4*i]
-		id[4*i+3] = id[4*i]
-	}
-	// at this stage, id = [1,1,1,1,|z,z,z,z|,...,|z**n-1,z**n-1,z**n-1,z**n-1]
+	uid = make([]fr.Element, 4*pk.DomainNum.Cardinality)  // shifter[0]*ID evaluated on odd cosets of (Z/8mZ)/(Z/mZ)
+	uuid = make([]fr.Element, 4*pk.DomainNum.Cardinality) // shifter[1]*ID evaluated on odd cosets of (Z/8mZ)/(Z/mZ)
 
 	var uu fr.Element
 	uu.Square(&pk.DomainNum.FinerGenerator)
 	var u [4]fr.Element
-	u[0].Set(&pk.DomainNum.FinerGenerator)                // u
-	u[1].Mul(&u[0], &uu)                                  // u**3
-	u[2].Mul(&u[1], &uu)                                  // u**5
-	u[3].Mul(&u[2], &uu)                                  // u**7
-	uid = make([]fr.Element, 4*pk.DomainNum.Cardinality)  // shifter[0]*ID evaluated on odd cosets of (Z/8mZ)/(Z/mZ)
-	uuid = make([]fr.Element, 4*pk.DomainNum.Cardinality) // shifter[1]*ID evaluated on odd cosets of (Z/8mZ)/(Z/mZ)
-	for i := 0; i < c; i++ {
+	u[0].Set(&pk.DomainNum.FinerGenerator) // u
+	u[1].Mul(&u[0], &uu)                   // u**3
+	u[2].Mul(&u[1], &uu)                   // u**5
+	u[3].Mul(&u[2], &uu)                   // u**7
 
-		id[4*i].Mul(&id[4*i], &u[0])     // coset u.<1,z,..,z**n-1>
-		id[4*i+1].Mul(&id[4*i+1], &u[1]) // coset u**3.<1,z,..,z**n-1>
-		id[4*i+2].Mul(&id[4*i+2], &u[2]) // coset u**5.<1,z,..,z**n-1>
-		id[4*i+3].Mul(&id[4*i+3], &u[3]) // coset u**7.<1,z,..,z**n-1>
+	// first elements, id == one * u, ...
+	copy(id[:], u[:])
 
-		uid[4*i].Mul(&id[4*i], &pk.Vk.Shifter[0])     // shifter[0]*ID
-		uid[4*i+1].Mul(&id[4*i+1], &pk.Vk.Shifter[0]) // shifter[0]*ID
-		uid[4*i+2].Mul(&id[4*i+2], &pk.Vk.Shifter[0]) // shifter[0]*ID
-		uid[4*i+3].Mul(&id[4*i+3], &pk.Vk.Shifter[0]) // shifter[0]*ID
+	zn := fr.One()
+	for i := 1; i < int(pk.DomainNum.Cardinality); i++ {
+		zn.Mul(&zn, &pk.DomainNum.Generator)
 
-		uuid[4*i].Mul(&id[4*i], &pk.Vk.Shifter[1])     // shifter[1]*ID
-		uuid[4*i+1].Mul(&id[4*i+1], &pk.Vk.Shifter[1]) // shifter[1]*ID
-		uuid[4*i+2].Mul(&id[4*i+2], &pk.Vk.Shifter[1]) // shifter[1]*ID
-		uuid[4*i+3].Mul(&id[4*i+3], &pk.Vk.Shifter[1]) // shifter[1]*ID
-
+		id[4*i].Mul(&zn, &u[0])   // coset u.<1,z,..,z**n-1>
+		id[4*i+1].Mul(&zn, &u[1]) // coset u**3.<1,z,..,z**n-1>
+		id[4*i+2].Mul(&zn, &u[2]) // coset u**5.<1,z,..,z**n-1>
+		id[4*i+3].Mul(&zn, &u[3]) // coset u**7.<1,z,..,z**n-1>
 	}
+	utils.Parallelize(len(id), func(start, end int) {
+		for i := start; i < end; i++ {
+			uid[i].Mul(&id[i], &pk.Vk.Shifter[0])  // shifter[0]*ID
+			uuid[i].Mul(&id[i], &pk.Vk.Shifter[1]) // shifter[1]*ID
+		}
+	})
+
 	return
 }
 
@@ -567,6 +558,7 @@ func evalStartsAtOne(pk *ProvingKey, evalZ polynomial.Polynomial) polynomial.Pol
 	lOneLagrange[0].SetOne()
 	pk.DomainNum.FFTInverse(lOneLagrange, fft.DIT, 0)
 	// TODO @thomas check that DIT witout bitReverse works as intened (DIF + bitReverse)
+	// TODO @thomas check that L1 and res can't be pre-computed or computed much faster
 
 	// evaluates L1 on the odd cosets of (Z/8mZ)/(Z/mZ)
 	res := make([]fr.Element, 4*pk.DomainNum.Cardinality)
@@ -657,28 +649,26 @@ func computeH(pk *ProvingKey, constraintsInd, constraintOrdering, startsAtOne po
 	u[1].Mul(&u[0], &uu)
 	u[2].Mul(&u[1], &uu)
 	u[3].Mul(&u[2], &uu)
-	u[0].Exp(u[0], &bExpo).Sub(&u[0], &one).Inverse(&u[0]) // (X**m-1)**-1 at u
-	u[1].Exp(u[1], &bExpo).Sub(&u[1], &one).Inverse(&u[1]) // (X**m-1)**-1 at u**3
-	u[2].Exp(u[2], &bExpo).Sub(&u[2], &one).Inverse(&u[2]) // (X**m-1)**-1 at u**5
-	u[3].Exp(u[3], &bExpo).Sub(&u[3], &one).Inverse(&u[3]) // (X**m-1)**-1 at u**7
+	u[0].Exp(u[0], &bExpo).Sub(&u[0], &one) // .Inverse(&u[0]) // (X**m-1)**-1 at u
+	u[1].Exp(u[1], &bExpo).Sub(&u[1], &one) // .Inverse(&u[1]) // (X**m-1)**-1 at u**3
+	u[2].Exp(u[2], &bExpo).Sub(&u[2], &one) // .Inverse(&u[2]) // (X**m-1)**-1 at u**5
+	u[3].Exp(u[3], &bExpo).Sub(&u[3], &one) // .Inverse(&u[3]) // (X**m-1)**-1 at u**7
+	uinv := fr.BatchInvert(u[:])
 
 	// evaluate qlL+qrR+qmL.R+qoO+k + alpha.(zu*g1*g2*g3*l-z*f1*f2*f3*l) + alpha**2*L1(X)(Z(X)-1)
 	// on the odd cosets of (Z/8mZ)/(Z/mZ)
-	for i := 0; i < 4*int(pk.DomainNum.Cardinality); i++ {
-		h[i].Mul(&startsAtOne[i], &alpha).
-			Add(&h[i], &constraintOrdering[i]).
-			Mul(&h[i], &alpha).
-			Add(&h[i], &constraintsInd[i])
-	}
-
+	// and
 	// evaluate qlL+qrR+qmL.R+qoO+k + alpha.(zu*g1*g2*g3*l-z*f1*f2*f3*l)/Z
 	// on the odd cosets of (Z/8mZ)/(Z/mZ)
-	for i := 0; i < int(pk.DomainNum.Cardinality); i++ {
-		h[4*i].Mul(&h[4*i], &u[0])
-		h[4*i+1].Mul(&h[4*i+1], &u[1])
-		h[4*i+2].Mul(&h[4*i+2], &u[2])
-		h[4*i+3].Mul(&h[4*i+3], &u[3])
-	}
+	utils.Parallelize(len(h), func(start, end int) {
+		for i := start; i < end; i++ {
+			h[i].Mul(&startsAtOne[i], &alpha).
+				Add(&h[i], &constraintOrdering[i]).
+				Mul(&h[i], &alpha).
+				Add(&h[i], &constraintsInd[i]).
+				Mul(&h[i], &uinv[i%4])
+		}
+	})
 
 	// put h in canonical form
 	pk.DomainH.FFTInverse(h, fft.DIF, 1)
