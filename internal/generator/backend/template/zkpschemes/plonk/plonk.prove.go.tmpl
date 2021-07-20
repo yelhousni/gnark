@@ -426,10 +426,10 @@ func evalConstraints(pk *ProvingKey, evalL, evalR, evalO, qk []fr.Element) []fr.
 		evalQl[i].Mul(&evalQl[i], &evalL[i])
 	}
 
-	wg.Wait()
-
 	evalQk := evalQm // we don't need evalQm 
 	evaluateCosets(qk, evalQk, &pk.DomainNum)
+
+	wg.Wait()
 
 	// computes the evaluation of qrR+qlL+qmL.R+qoO+k on the odd cosets
 	// of (Z/8mZ)/(Z/mZ)
@@ -566,29 +566,31 @@ func evalStartsAtOne(pk *ProvingKey, evalZ polynomial.Polynomial) polynomial.Pol
 func evaluateCosets(poly, res []fr.Element, domain *fft.Domain) {
 
 	// build a copy of poly padded with 0 so it has the length of the closest power of 2 of poly
-	evaluations := make([][]fr.Element, 4)
-	evaluations[0] = make([]fr.Element, domain.Cardinality)
-	evaluations[1] = make([]fr.Element, domain.Cardinality)
-	evaluations[2] = make([]fr.Element, domain.Cardinality)
-	evaluations[3] = make([]fr.Element, domain.Cardinality)
+	e0 := make([]fr.Element, domain.Cardinality)
+	e1 := make([]fr.Element, domain.Cardinality)
+	e2 := make([]fr.Element, domain.Cardinality)
+	e3 := make([]fr.Element, domain.Cardinality)
 
 	// evaluations[i] must contain poly in the canonical basis
-	copy(evaluations[0], poly)
-	fft.BitReverse(evaluations[0])
-	copy(evaluations[1], evaluations[0])
-	copy(evaluations[2], evaluations[0])
-	copy(evaluations[3], evaluations[0])
+	copy(e0, poly)
+	fft.BitReverse(e0)
+	copy(e1, e0)
+	copy(e2, e0)
+	copy(e3, e0)
 
-	domain.FFT(evaluations[0], fft.DIT, 1)
-	domain.FFT(evaluations[1], fft.DIT, 3)
-	domain.FFT(evaluations[2], fft.DIT, 5)
-	domain.FFT(evaluations[3], fft.DIT, 7)
+	var wg sync.WaitGroup
+	wg.Add(3)
+	
+	domain.FFT(e0, fft.DIT, 1)
+	domain.FFT(e1, fft.DIT, 3)
+	domain.FFT(e2, fft.DIT, 5)
+	domain.FFT(e3, fft.DIT, 7)
 
 	for i := uint64(0); i < domain.Cardinality; i++ {
-		res[4*i] = evaluations[0][i]
-		res[4*i+1] = evaluations[1][i]
-		res[4*i+2] = evaluations[2][i]
-		res[4*i+3] = evaluations[3][i]
+		res[4*i] = e0[i]
+		res[4*i+1] = e1[i]
+		res[4*i+2] = e2[i]
+		res[4*i+3] = e3[i]
 	}
 }
 
@@ -596,11 +598,10 @@ func evaluateCosets(poly, res []fr.Element, domain *fft.Domain) {
 func shiftZ(z polynomial.Polynomial) polynomial.Polynomial {
 
 	res := make(polynomial.Polynomial, len(z))
-	copy(res, z)
 
-	buf := res[0]
+	buf := z[0]
 	for i := 0; i < len(res)-1; i++ {
-		res[i] = res[i+1]
+		res[i] = z[i+1]
 	}
 	res[len(res)-1] = buf
 
