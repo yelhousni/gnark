@@ -124,11 +124,16 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness bls12_381witness.Witn
 	var gamma fr.Element
 	gamma.SetBytes(bgamma)
 
-	// compute Z, the permutation accumulator polynomial, in Lagrange basis
-	z := computeZ(ll, lr, lo, pk, gamma)
+	chZ := make(chan struct{}, 1)
+	var z, zu polynomial.Polynomial
+	go func() {
+		// compute Z, the permutation accumulator polynomial, in Lagrange basis
+		z = computeZ(ll, lr, lo, pk, gamma)
 
-	// compute Z(uX), in Lagrange basis
-	zu := shitZ(z)
+		// compute Z(uX), in Lagrange basis
+		zu = shiftZ(z)
+		close(chZ)
+	}()
 
 	// compute the evaluations of l, r, o on odd cosets of (Z/8mZ)/(Z/mZ)
 	evalL := make([]fr.Element, 4*pk.DomainNum.Cardinality)
@@ -137,6 +142,8 @@ func Prove(spr *cs.SparseR1CS, pk *ProvingKey, fullWitness bls12_381witness.Witn
 	evaluateCosets(cl, evalL, &pk.DomainNum)
 	evaluateCosets(cr, evalR, &pk.DomainNum)
 	evaluateCosets(co, evalO, &pk.DomainNum)
+
+	<-chZ
 
 	// compute qk in canonical basis, completed with the public inputs
 	qkFullC := make(polynomial.Polynomial, sizeCommon)
@@ -399,39 +406,58 @@ func computeZ(l, r, o polynomial.Polynomial, pk *ProvingKey, gamma fr.Element) p
 // the odd cosets of (Z/8mZ)/(Z/mZ), where m=nbConstraints+nbAssertions.
 func evalConstraints(pk *ProvingKey, evalL, evalR, evalO, qk []fr.Element) []fr.Element {
 
-	res := make([]fr.Element, 4*pk.DomainNum.Cardinality)
-
 	// evaluates ql, qr, qm, qo, k on the odd cosets of (Z/8mZ)/(Z/mZ)
 	evalQl := make([]fr.Element, 4*pk.DomainNum.Cardinality)
 	evalQr := make([]fr.Element, 4*pk.DomainNum.Cardinality)
 	evalQm := make([]fr.Element, 4*pk.DomainNum.Cardinality)
 	evalQo := make([]fr.Element, 4*pk.DomainNum.Cardinality)
-	evalQk := make([]fr.Element, 4*pk.DomainNum.Cardinality)
+
 	evaluateCosets(pk.Ql, evalQl, &pk.DomainNum)
-	evaluateCosets(pk.Qr, evalQr, &pk.DomainNum)
 	evaluateCosets(pk.Qm, evalQm, &pk.DomainNum)
+	evaluateCosets(pk.Qr, evalQr, &pk.DomainNum)
 	evaluateCosets(pk.Qo, evalQo, &pk.DomainNum)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		for i := 0; i < len(evalQr); i++ {
+			// evalQr will contain qr.r
+			evalQr[i].Mul(&evalQr[i], &evalR[i])
+		}
+		wg.Done()
+	}()
+	go func() {
+		for i := 0; i < len(evalQo); i++ {
+			// evalQo will contain qr.o
+			evalQo[i].Mul(&evalQo[i], &evalO[i])
+		}
+		wg.Done()
+	}()
+
+	var buf fr.Element
+	for i := 0; i < len(evalQl); i++ {
+		// evalQl will contain (ql + qm.r) * l = ql.l + qm.l.r
+		buf.Mul(&evalQm[i], &evalR[i])
+		evalQl[i].Add(&evalQl[i], &buf)
+		evalQl[i].Mul(&evalQl[i], &evalL[i])
+	}
+
+	wg.Wait()
+
+	evalQk := evalQm // we don't need evalQm
 	evaluateCosets(qk, evalQk, &pk.DomainNum)
 
 	// computes the evaluation of qrR+qlL+qmL.R+qoO+k on the odd cosets
 	// of (Z/8mZ)/(Z/mZ)
-	var acc, buf fr.Element
-	for i := uint64(0); i < 4*pk.DomainNum.Cardinality; i++ {
-
-		acc.Mul(&evalQl[i], &evalL[i]) // ql.l
-
-		buf.Mul(&evalQr[i], &evalR[i])
-		acc.Add(&acc, &buf) // ql.l + qr.r
-
-		buf.Mul(&evalQm[i], &evalL[i]).Mul(&buf, &evalR[i])
-		acc.Add(&acc, &buf) // ql.l + qr.r + qm.l.r
-
-		buf.Mul(&evalQo[i], &evalO[i])
-		acc.Add(&acc, &buf)          // ql.l + qr.r + qm.l.r + qo.o
-		res[i].Add(&acc, &evalQk[i]) // ql.l + qr.r + qm.l.r + qo.o + k
+	for i := 0; i < len(evalQk); i++ {
+		// ql.l + qr.r + qm.l.r + qo.o + k
+		evalQk[i].Add(&evalQk[i], &evalQl[i]).
+			Add(&evalQk[i], &evalQr[i]).
+			Add(&evalQk[i], &evalQo[i])
 	}
 
-	return res
+	return evalQk
 }
 
 // evalIDCosets id, uid, u**2id on the odd cosets of (Z/8mZ)/(Z/mZ)
@@ -592,8 +618,8 @@ func evaluateCosets(poly, res []fr.Element, domain *fft.Domain) {
 	}
 }
 
-// shitZ turns z to z(uX) (both in Lagrange basis)
-func shitZ(z polynomial.Polynomial) polynomial.Polynomial {
+// shiftZ turns z to z(uX) (both in Lagrange basis)
+func shiftZ(z polynomial.Polynomial) polynomial.Polynomial {
 
 	res := make(polynomial.Polynomial, len(z))
 	copy(res, z)
