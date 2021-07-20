@@ -412,14 +412,10 @@ func evalConstraints(pk *ProvingKey, evalL, evalR, evalO, qk []fr.Element) []fr.
 	evalQm := make([]fr.Element, 4*pk.DomainNum.Cardinality)
 	evalQo := make([]fr.Element, 4*pk.DomainNum.Cardinality)
 
-	evaluateCosets(pk.Ql, evalQl, &pk.DomainNum)
-	evaluateCosets(pk.Qm, evalQm, &pk.DomainNum)
-	evaluateCosets(pk.Qr, evalQr, &pk.DomainNum)
-	evaluateCosets(pk.Qo, evalQo, &pk.DomainNum)
-
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	evaluateCosets(pk.Qr, evalQr, &pk.DomainNum)
 	go func() {
 		for i := 0; i < len(evalQr); i++ {
 			// evalQr will contain qr.r
@@ -427,6 +423,8 @@ func evalConstraints(pk *ProvingKey, evalL, evalR, evalO, qk []fr.Element) []fr.
 		}
 		wg.Done()
 	}()
+
+	evaluateCosets(pk.Qo, evalQo, &pk.DomainNum)
 	go func() {
 		for i := 0; i < len(evalQo); i++ {
 			// evalQo will contain qr.o
@@ -434,6 +432,9 @@ func evalConstraints(pk *ProvingKey, evalL, evalR, evalO, qk []fr.Element) []fr.
 		}
 		wg.Done()
 	}()
+
+	evaluateCosets(pk.Ql, evalQl, &pk.DomainNum)
+	evaluateCosets(pk.Qm, evalQm, &pk.DomainNum)
 
 	var buf fr.Element
 	for i := 0; i < len(evalQl); i++ {
