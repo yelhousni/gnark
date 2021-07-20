@@ -394,51 +394,40 @@ func evalConstraints(pk *ProvingKey, evalL, evalR, evalO, qk []fr.Element) []fr.
 	evalQo := make([]fr.Element, 4*pk.DomainNum.Cardinality)
 	
 
-	var wg sync.WaitGroup 
-	wg.Add(2)
-
 	evaluateCosets(pk.Qr, evalQr, &pk.DomainNum)
-	go func() {
-		for i:=0; i< len(evalQr); i++ {
-			// evalQr will contain qr.r
-			evalQr[i].Mul(&evalQr[i], &evalR[i])
-		}
-		wg.Done()
-	}()
-
 	evaluateCosets(pk.Qo, evalQo, &pk.DomainNum)
-	go func() {
-		for i:=0; i< len(evalQo); i++ {
-			// evalQo will contain qr.o
-			evalQo[i].Mul(&evalQo[i], &evalO[i])
-		}
-		wg.Done()
-	}()
-
 	evaluateCosets(pk.Ql, evalQl, &pk.DomainNum)
 	evaluateCosets(pk.Qm, evalQm, &pk.DomainNum)
 	
-	var buf fr.Element 
-	for i:=0; i< len(evalQl); i++ {
-		// evalQl will contain (ql + qm.r) * l = ql.l + qm.l.r
-		buf.Mul(&evalQm[i], &evalR[i])
-		evalQl[i].Add(&evalQl[i], &buf)
-		evalQl[i].Mul(&evalQl[i], &evalL[i])
-	}
+
+	utils.Parallelize(len(evalQr), func(start, end int) {
+		var buf fr.Element 
+		for i := start; i < end; i++ {
+			// evalQo will contain qr.o
+			evalQo[i].Mul(&evalQo[i], &evalO[i])
+			// evalQr will contain qr.r
+			evalQr[i].Mul(&evalQr[i], &evalR[i])
+			// evalQl will contain (ql + qm.r) * l = ql.l + qm.l.r
+			buf.Mul(&evalQm[i], &evalR[i])
+			evalQl[i].Add(&evalQl[i], &buf)
+			evalQl[i].Mul(&evalQl[i], &evalL[i])
+		}
+	})
+
 
 	evalQk := evalQm // we don't need evalQm 
 	evaluateCosets(qk, evalQk, &pk.DomainNum)
 
-	wg.Wait()
-
 	// computes the evaluation of qrR+qlL+qmL.R+qoO+k on the odd cosets
 	// of (Z/8mZ)/(Z/mZ)
-	for i := 0; i < len(evalQk); i++ {
-		 // ql.l + qr.r + qm.l.r + qo.o + k
-		evalQk[i].Add(&evalQk[i], &evalQl[i]).
-				Add(&evalQk[i], &evalQr[i]).
-				Add(&evalQk[i], &evalQo[i])
-	}
+	utils.Parallelize(len(evalQk), func(start, end int) {
+		for i := start; i < end; i++ {
+			// ql.l + qr.r + qm.l.r + qo.o + k
+			evalQk[i].Add(&evalQk[i], &evalQl[i]).
+					Add(&evalQk[i], &evalQr[i]).
+					Add(&evalQk[i], &evalQo[i])
+		}
+	})
 
 	return evalQk
 }
@@ -459,18 +448,37 @@ func evalIDCosets(pk *ProvingKey) (id, uid, uuid polynomial.Polynomial) {
 	u[2].Mul(&u[1], &uu)                                  // u**5
 	u[3].Mul(&u[2], &uu)                                  // u**7
 
-	// first elements, id == one * u, ...
-	copy(id[:], u[:]) 
+	// id contains
+	// coset u.<1,z,..,z**n-1>
+	// coset u**3.<1,z,..,z**n-1>
+	// coset u**5.<1,z,..,z**n-1>
+	// coset u**7.<1,z,..,z**n-1>
 
+	id[0] = pk.DomainNum.FinerGenerator
 	zn := fr.One()
 	for i := 1; i < int(pk.DomainNum.Cardinality); i++ {
 		zn.Mul(&zn, &pk.DomainNum.Generator)
-
-		id[4*i].Mul(&zn, &u[0])     // coset u.<1,z,..,z**n-1>
-		id[4*i+1].Mul(&zn, &u[1]) // coset u**3.<1,z,..,z**n-1>
-		id[4*i+2].Mul(&zn, &u[2]) // coset u**5.<1,z,..,z**n-1>
-		id[4*i+3].Mul(&zn, &u[3]) // coset u**7.<1,z,..,z**n-1>
+		id[i] = zn 
 	}
+
+ 	id1 := id[1*pk.DomainNum.Cardinality:2*pk.DomainNum.Cardinality]
+ 	id2 := id[2*pk.DomainNum.Cardinality:3*pk.DomainNum.Cardinality]
+ 	id3 := id[3*pk.DomainNum.Cardinality:4*pk.DomainNum.Cardinality]
+
+	copy(id1[1:], id[1:pk.DomainNum.Cardinality]) 
+	copy(id2[1:], id[1:pk.DomainNum.Cardinality]) 
+	copy(id3[1:], id[1:pk.DomainNum.Cardinality]) 
+	id1[0] = u[1]
+	id2[0] = u[2]
+	id3[0] = u[3]
+
+	for i := 1; i < int(pk.DomainNum.Cardinality); i++ {
+		id[i].Mul(&id[i], &u[0])
+		id1[i].Mul(&id1[i], &u[1])
+		id2[i].Mul(&id2[i], &u[2])
+		id3[i].Mul(&id3[i], &u[3])
+	}
+	
 	utils.Parallelize(len(id), func(start, end int) {
 		for i := start; i < end; i++ {
 			uid[i].Mul(&id[i], &pk.Vk.Shifter[0])// shifter[0]*ID
@@ -566,10 +574,10 @@ func evalStartsAtOne(pk *ProvingKey, evalZ polynomial.Polynomial) polynomial.Pol
 func evaluateCosets(poly, res []fr.Element, domain *fft.Domain) {
 
 	// build a copy of poly padded with 0 so it has the length of the closest power of 2 of poly
-	e0 := make([]fr.Element, domain.Cardinality)
-	e1 := make([]fr.Element, domain.Cardinality)
-	e2 := make([]fr.Element, domain.Cardinality)
-	e3 := make([]fr.Element, domain.Cardinality)
+	e0 := res[0*domain.Cardinality:1*domain.Cardinality] //make([]fr.Element, domain.Cardinality)
+	e1 := res[1*domain.Cardinality:2*domain.Cardinality] //make([]fr.Element, domain.Cardinality)
+	e2 := res[2*domain.Cardinality:3*domain.Cardinality] //make([]fr.Element, domain.Cardinality)
+	e3 := res[3*domain.Cardinality:4*domain.Cardinality] //make([]fr.Element, domain.Cardinality)
 
 	// evaluations[i] must contain poly in the canonical basis
 	copy(e0, poly)
@@ -578,20 +586,10 @@ func evaluateCosets(poly, res []fr.Element, domain *fft.Domain) {
 	copy(e2, e0)
 	copy(e3, e0)
 
-	var wg sync.WaitGroup
-	wg.Add(3)
-	
 	domain.FFT(e0, fft.DIT, 1)
 	domain.FFT(e1, fft.DIT, 3)
 	domain.FFT(e2, fft.DIT, 5)
 	domain.FFT(e3, fft.DIT, 7)
-
-	for i := uint64(0); i < domain.Cardinality; i++ {
-		res[4*i] = e0[i]
-		res[4*i+1] = e1[i]
-		res[4*i+2] = e2[i]
-		res[4*i+3] = e3[i]
-	}
 }
 
 // shiftZ turns z to z(uX) (both in Lagrange basis)
@@ -647,10 +645,29 @@ func computeH(pk *ProvingKey, constraintsInd, constraintOrdering, startsAtOne po
 			h[i].Mul(&startsAtOne[i], &alpha).
 			Add(&h[i], &constraintOrdering[i]).
 			Mul(&h[i], &alpha).
-			Add(&h[i], &constraintsInd[i]).
-			Mul(&h[i], &uinv[i % 4])
+			Add(&h[i], &constraintsInd[i])
+			// TODO @gbotrel
+			if i < int(pk.DomainNum.Cardinality) {
+				h[i].Mul(&h[i], &uinv[0])
+			} else if i < 2 * int(pk.DomainNum.Cardinality) {
+				h[i].Mul(&h[i], &uinv[1])
+			} else if i < 3 * int(pk.DomainNum.Cardinality) {
+				h[i].Mul(&h[i], &uinv[2])
+			} else {
+				h[i].Mul(&h[i], &uinv[3])
+			}	
 		}
 	})
+
+	hcopy := make(polynomial.Polynomial, pk.DomainH.Cardinality)
+	copy(hcopy, h)
+    for i := 0; i < int(pk.DomainNum.Cardinality); i++ {
+		h[4*i] 	 = hcopy[i ]
+		h[4*i+1] = hcopy[i+1 * int(pk.DomainNum.Cardinality)]
+		h[4*i+2] = hcopy[i+2 * int(pk.DomainNum.Cardinality)]
+		h[4*i+3] = hcopy[i+3 * int(pk.DomainNum.Cardinality)]
+    }
+
 
 	// put h in canonical form
 	pk.DomainH.FFTInverse(h, fft.DIF, 1)
