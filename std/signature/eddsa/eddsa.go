@@ -75,6 +75,8 @@ func Verify(cs *frontend.ConstraintSystem, sig Signature, msg frontend.Variable,
 		basis = cs.Constant("6277101735386680763835789423207666416102355444464034512896") // 2**192
 	case ecc.BLS24_315:
 		basis = cs.Constant("340282366920938463463374607431768211456")
+	case ecc.BW6_633:
+		basis = cs.Constant("1461501637330902918203684832716283019655932542976") // 2**160
 	default:
 		panic("curve is not supported")
 	}

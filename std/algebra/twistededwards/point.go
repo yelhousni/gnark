@@ -128,6 +128,8 @@ func (p *Point) ScalarMulNonFixedBase(cs *frontend.ConstraintSystem, p1 *Point, 
 	var frSize int
 	if curve.ID == ecc.BW6_761 {
 		frSize = 384
+	} else if curve.ID == ecc.BW6_633 {
+		frSize = 320
 	} else {
 		frSize = 256
 	}
@@ -163,6 +165,8 @@ func (p *Point) ScalarMulFixedBase(cs *frontend.ConstraintSystem, x, y interface
 	var frSize int
 	if curve.ID == ecc.BW6_761 {
 		frSize = 384
+	} else if curve.ID == ecc.BW6_633 {
+		frSize = 320
 	} else {
 		frSize = 256
 	}
