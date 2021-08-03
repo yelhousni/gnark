@@ -18,11 +18,13 @@ package cs
 
 import (
 	"fmt"
+	"github.com/consensys/gnark-crypto/ecc"
+	"github.com/fxamacker/cbor/v2"
+	"io"
 	"math/big"
 
-	"github.com/consensys/gnark-crypto/ecc"
-
 	"github.com/consensys/gnark/internal/backend/compiled"
+	"github.com/consensys/gnark/internal/backend/ioutils"
 
 	"github.com/consensys/gnark-crypto/ecc/bw6-633/fr"
 )
@@ -62,6 +64,27 @@ func (cs *SparseR1CS) CurveID() ecc.ID {
 	return ecc.BW6_633
 }
 
+// WriteTo encodes SparseR1CS into provided io.Writer using cbor
+func (cs *SparseR1CS) WriteTo(w io.Writer) (int64, error) {
+	_w := ioutils.WriterCounter{W: w} // wraps writer to count the bytes written
+	encoder := cbor.NewEncoder(&_w)
+
+	// encode our object
+	err := encoder.Encode(cs)
+	return _w.N, err
+}
+
+// ReadFrom attempts to decode SparseR1CS from io.Reader using cbor
+func (cs *SparseR1CS) ReadFrom(r io.Reader) (int64, error) {
+	dm, err := cbor.DecOptions{MaxArrayElements: 134217728}.DecMode()
+	if err != nil {
+		return 0, err
+	}
+	decoder := dm.NewDecoder(r)
+	err = decoder.Decode(cs)
+	return int64(decoder.NumBytesRead()), err
+}
+
 // find unsolved variable
 // returns 0 if the variable to solve is L, 1 if it's R, 2 if it's O
 func findUnsolvedVariable(c compiled.SparseR1C, wireInstantiated []bool) int {
@@ -95,7 +118,7 @@ func (cs *SparseR1CS) computeTerm(t compiled.Term, solution []fr.Element) fr.Ele
 // and solution. Those are used to find which variable remains to be solved,
 // and the way of solving it (binary or single value). Once the variable(s)
 // is solved, solution and wireInstantiated are updated.
-func (cs *SparseR1CS) solveConstraint(c compiled.SparseR1C, wireInstantiated []bool, solution []fr.Element) {
+func (cs *SparseR1CS) solveConstraint(c compiled.SparseR1C, wireInstantiated []bool, solution, coefficientsInv []fr.Element) {
 
 	switch c.Solver {
 	case compiled.SingleOutput:
@@ -113,6 +136,7 @@ func (cs *SparseR1CS) solveConstraint(c compiled.SparseR1C, wireInstantiated []b
 			v2 = cs.computeTerm(c.O, solution)
 			num.Add(&v1, &v2).Add(&num, &cs.Coefficients[c.K])
 
+			// TODO find a way to do lazy div (/ batch inversion)
 			solution[c.L.VariableID()].Div(&num, &den).Neg(&solution[c.L.VariableID()])
 			wireInstantiated[c.L.VariableID()] = true
 
@@ -128,6 +152,7 @@ func (cs *SparseR1CS) solveConstraint(c compiled.SparseR1C, wireInstantiated []b
 			v2 = cs.computeTerm(c.O, solution)
 			num.Add(&v1, &v2).Add(&num, &cs.Coefficients[c.K])
 
+			// TODO find a way to do lazy div (/ batch inversion)
 			solution[c.L.VariableID()].Div(&num, &den).Neg(&solution[c.L.VariableID()])
 			wireInstantiated[c.L.VariableID()] = true
 
@@ -138,7 +163,7 @@ func (cs *SparseR1CS) solveConstraint(c compiled.SparseR1C, wireInstantiated []b
 			_m := cs.computeTerm(c.M[1], solution)
 			m.Mul(&m, &_m)
 			m.Add(&m, &l).Add(&m, &r).Add(&m, &cs.Coefficients[c.K])
-			m.Div(&m, &cs.Coefficients[c.O.CoeffID()])
+			m.Mul(&m, &coefficientsInv[c.O.CoeffID()])
 
 			solution[c.O.VariableID()].Neg(&m)
 			wireInstantiated[c.O.VariableID()] = true
@@ -222,9 +247,11 @@ func (cs *SparseR1CS) Solve(witness []fr.Element) (solution []fr.Element, err er
 	// defer log printing once all wireValues are computed
 	defer cs.printLogs(solution, wireInstantiated)
 
+	coefficientsInv := fr.BatchInvert(cs.Coefficients)
+
 	// loop through the constraints to solve the variables
 	for i := 0; i < len(cs.Constraints); i++ {
-		cs.solveConstraint(cs.Constraints[i], wireInstantiated, solution)
+		cs.solveConstraint(cs.Constraints[i], wireInstantiated, solution, coefficientsInv)
 		err = cs.checkConstraint(cs.Constraints[i], solution)
 		if err != nil {
 			fmt.Printf("%d-th constraint\n", i)
