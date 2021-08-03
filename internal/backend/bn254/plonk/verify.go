@@ -24,8 +24,11 @@ import (
 
 	"github.com/consensys/gnark-crypto/ecc/bn254/fr/kzg"
 
+	curve "github.com/consensys/gnark-crypto/ecc/bn254"
+
 	bn254witness "github.com/consensys/gnark/internal/backend/bn254/witness"
 
+	"github.com/consensys/gnark-crypto/ecc"
 	"github.com/consensys/gnark-crypto/fiat-shamir"
 )
 
@@ -37,70 +40,37 @@ func Verify(proof *Proof, vk *VerifyingKey, publicWitness bn254witness.Witness) 
 
 	// derive gamma from Comm(l), Comm(r), Comm(o)
 	fs := fiatshamir.NewTranscript(fiatshamir.SHA256, "gamma", "alpha", "zeta")
-	err := fs.Bind("gamma", proof.LRO[0].Marshal())
+	// derive gamma from Comm(l), Comm(r), Comm(o)
+	gamma, err := deriveRandomess(&fs, "gamma", &proof.LRO[0], &proof.LRO[1], &proof.LRO[2])
 	if err != nil {
 		return err
 	}
-	err = fs.Bind("gamma", proof.LRO[1].Marshal())
-	if err != nil {
-		return err
-	}
-	err = fs.Bind("gamma", proof.LRO[2].Marshal())
-	if err != nil {
-		return err
-	}
-	bgamma, err := fs.ComputeChallenge("gamma")
-	if err != nil {
-		return err
-	}
-	var gamma fr.Element
-	gamma.SetBytes(bgamma)
 
 	// derive alpha from Comm(l), Comm(r), Comm(o), Com(Z)
-	err = fs.Bind("alpha", proof.Z.Marshal())
+	alpha, err := deriveRandomess(&fs, "alpha", &proof.Z)
 	if err != nil {
 		return err
 	}
-	balpha, err := fs.ComputeChallenge("alpha")
-	if err != nil {
-		return err
-	}
-	var alpha fr.Element
-	alpha.SetBytes(balpha)
 
 	// derive zeta, the point of evaluation
-	err = fs.Bind("zeta", proof.H[0].Marshal())
+	zeta, err := deriveRandomess(&fs, "zeta", &proof.H[0], &proof.H[1], &proof.H[2])
 	if err != nil {
 		return err
 	}
-	err = fs.Bind("zeta", proof.H[1].Marshal())
-	if err != nil {
-		return err
-	}
-	err = fs.Bind("zeta", proof.H[2].Marshal())
-	if err != nil {
-		return err
-	}
-	bzeta, err := fs.ComputeChallenge("zeta")
-	if err != nil {
-		return err
-	}
-	var zeta fr.Element
-	zeta.SetBytes(bzeta)
 
 	// evaluation of Z=X**m-1 at zeta
-	var zetaPowerM, zzeta, one fr.Element
+	var zetaPowerM, zzeta fr.Element
 	var bExpo big.Int
-	one.SetOne()
+	one := fr.One()
 	bExpo.SetUint64(vk.Size)
 	zetaPowerM.Exp(zeta, &bExpo)
 	zzeta.Sub(&zetaPowerM, &one)
 
 	// ccompute PI = Sum_i<n L_i*w_i
 	// TODO use batch inversion
-	var pi, den, acc, lagrange, lagrangeOne, xiLi fr.Element
-	lagrange.Set(&zzeta) // zeta**m-1
-	acc.SetOne()
+	var pi, den, lagrangeOne, xiLi fr.Element
+	lagrange := zzeta // zeta**m-1
+	acc := fr.One()
 	den.Sub(&zeta, &acc)
 	lagrange.Div(&lagrange, &den).Mul(&lagrange, &vk.SizeInv) // 1/n*(zeta**n-1)/(zeta-1)
 	lagrangeOne.Set(&lagrange)                                // save it for later
@@ -156,36 +126,27 @@ func Verify(proof *Proof, vk *VerifyingKey, publicWitness bn254witness.Witness) 
 	}
 
 	// compute the folded commitment to H: Comm(h1) + zeta**m*Comm(h2) + zeta**2m*Comm(h3)
-	var zetaPowerMBigInt big.Int
-	zetaPowerM.ToBigIntRegular(&zetaPowerMBigInt)
+	mPlusTwo := big.NewInt(int64(vk.Size) + 2)
+	var zetaMPlusTwo fr.Element
+	zetaMPlusTwo.Exp(zeta, mPlusTwo)
+	var zetaMPlusTwoBigInt big.Int
+	zetaMPlusTwo.ToBigIntRegular(&zetaMPlusTwoBigInt)
 	foldedH := proof.H[2]
-	foldedH.ScalarMultiplication(&foldedH, &zetaPowerMBigInt)
+	foldedH.ScalarMultiplication(&foldedH, &zetaMPlusTwoBigInt)
 	foldedH.Add(&foldedH, &proof.H[1])
-	foldedH.ScalarMultiplication(&foldedH, &zetaPowerMBigInt)
+	foldedH.ScalarMultiplication(&foldedH, &zetaMPlusTwoBigInt)
 	foldedH.Add(&foldedH, &proof.H[0])
 
 	// Compute the commitment to the linearized polynomial
+	// linearizedPolynomialDigest =
+	// 		l*ql+r*qr+rl*qm+o*qo+qk +
+	// 		alpha*( Z(uzeta)(a+s1+gamma)*(b+s2+gamma)*s3(X)-Z(X)(a+zeta+gamma)*(b+uzeta+gamma)*(c+u**2*zeta+gamma) ) +
+	// 		alpha**2*L1(zeta)*Z
 	// first part: individual constraints
-	// TODO clean that part, lots of copy / use of Affine coordinates
-	var lb, rb, ob, rlb big.Int
 	var rl fr.Element
-	l.ToBigIntRegular(&lb)
-	r.ToBigIntRegular(&rb)
-	o.ToBigIntRegular(&ob)
-	rl.Mul(&l, &r).ToBigIntRegular(&rlb)
-	linearizedPolynomialDigest := vk.Ql
-	linearizedPolynomialDigest.ScalarMultiplication(&linearizedPolynomialDigest, &lb) //l*ql
-	tmp := vk.Qr
-	tmp.ScalarMultiplication(&tmp, &rb)
-	linearizedPolynomialDigest.Add(&linearizedPolynomialDigest, &tmp) // l*ql+r*qr
-	tmp = vk.Qm
-	tmp.ScalarMultiplication(&tmp, &rlb)
-	linearizedPolynomialDigest.Add(&linearizedPolynomialDigest, &tmp) // l*ql+r*qr+rl*qm
-	tmp = vk.Qo
-	tmp.ScalarMultiplication(&tmp, &ob)
-	linearizedPolynomialDigest.Add(&linearizedPolynomialDigest, &tmp) // l*ql+r*qr+rl*qm+o*qo
-	tmp = vk.Qk
-	linearizedPolynomialDigest.Add(&linearizedPolynomialDigest, &tmp) // l*ql+r*qr+rl*qm+o*qo+qk
+	rl.Mul(&l, &r)
+
+	var linearizedPolynomialDigest curve.G1Affine
 
 	// second part: alpha*( Z(uzeta)(a+s1+gamma)*(b+s2+gamma)*s3(X)-Z(X)(a+zeta+gamma)*(b+uzeta+gamma)*(c+u**2*zeta+gamma) )
 	var t fr.Element
@@ -200,27 +161,23 @@ func Verify(proof *Proof, vk *VerifyingKey, publicWitness bn254witness.Witness) 
 	t.Mul(&zeta, &vk.Shifter[1]).Add(&t, &o).Add(&t, &gamma)
 	_s2.Mul(&t, &_s2).
 		Mul(&_s2, &alpha) // alpha*(a+zeta+gamma)*(b+uzeta+gamma)*(c+u**2*zeta+gamma)
-	var _s1b, _s2b big.Int
-	_s1.ToBigIntRegular(&_s1b)
-	_s2.ToBigIntRegular(&_s2b)
-	s3Commit := vk.S[2]
-	s3Commit.ScalarMultiplication(&s3Commit, &_s1b)
-	secondPart := proof.Z
-	secondPart.ScalarMultiplication(&secondPart, &_s2b)
-	secondPart.Sub(&s3Commit, &secondPart)
+	_s2.Sub(&alphaSquareLagrange, &_s2)
+	// note since third part =  alpha**2*L1(zeta)*Z
+	// we add alphaSquareLagrange to _s2
 
-	// third part: alpha**2*L1(zeta)*Z
-	var alphaSquareLagrangeB big.Int
-	alphaSquareLagrange.ToBigIntRegular(&alphaSquareLagrangeB)
-	thirdPart := proof.Z
-	thirdPart.ScalarMultiplication(&thirdPart, &alphaSquareLagrangeB)
+	points := []curve.G1Affine{
+		vk.Ql, vk.Qr, vk.Qm, vk.Qo, vk.Qk, // first part
+		vk.S[2], proof.Z, // second & third part
+	}
 
-	// finish the computation
-	linearizedPolynomialDigest.Add(&linearizedPolynomialDigest, &secondPart).
-		Add(&linearizedPolynomialDigest, &thirdPart)
+	scalars := []fr.Element{
+		l, r, rl, o, one, // first part
+		_s1, _s2, // second & third part
+	}
+	linearizedPolynomialDigest.MultiExp(points, scalars, ecc.MultiExpConfig{ScalarsMont: true})
 
 	// verify the opening proofs
-	err = vk.KZG.BatchVerifySinglePoint(
+	if err := kzg.BatchVerifySinglePoint(
 		[]kzg.Digest{
 			foldedH,
 			linearizedPolynomialDigest,
@@ -231,15 +188,29 @@ func Verify(proof *Proof, vk *VerifyingKey, publicWitness bn254witness.Witness) 
 			vk.S[1],
 		},
 		&proof.BatchedProof,
-	)
-	if err != nil {
+		vk.KZGSRS,
+	); err != nil {
 		return err
 	}
 
-	err = vk.KZG.Verify(&proof.Z, &proof.ZShiftedOpening)
-	if err != nil {
-		return err
+	return kzg.Verify(&proof.Z, &proof.ZShiftedOpening, vk.KZGSRS)
+}
+
+func deriveRandomess(fs *fiatshamir.Transcript, challenge string, points ...*curve.G1Affine) (fr.Element, error) {
+	var buf [curve.SizeOfG1AffineUncompressed]byte
+	var r fr.Element
+
+	for _, p := range points {
+		buf = p.RawBytes()
+		if err := fs.Bind(challenge, buf[:]); err != nil {
+			return r, err
+		}
 	}
 
-	return nil
+	b, err := fs.ComputeChallenge(challenge)
+	if err != nil {
+		return r, err
+	}
+	r.SetBytes(b)
+	return r, nil
 }

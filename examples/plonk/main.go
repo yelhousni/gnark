@@ -88,16 +88,16 @@ func main() {
 	_r1cs := r1cs.(*cs.SparseR1CS)
 	nbConstraints := len(_r1cs.Constraints)
 	nbVariables := _r1cs.NbInternalVariables + _r1cs.NbPublicVariables + _r1cs.NbSecretVariables
-	var s, size int
+	var s uint64
 	if nbConstraints > nbVariables {
-		s = nbConstraints
+		s = uint64(nbConstraints)
 	} else {
-		s = nbVariables
+		s = uint64(nbVariables)
 	}
-	size = 1
-	for ; size < s; size *= 2 {
+	srs, err := kzg.NewSRS(ecc.NextPowerOfTwo(s)+3, new(big.Int).SetInt64(42))
+	if err != nil {
+		panic(err)
 	}
-	kate := kzg.NewSRS(size, new(big.Int).SetInt64(42))
 
 	// Correct data: the proof passes
 	{
@@ -114,7 +114,7 @@ func main() {
 		// public data consists the polynomials describing the constants involved
 		// in the constraints, the polynomial describing the permutation ("grand
 		// product argument"), and the FFT domains.
-		pk, vk, err := plonk.Setup(r1cs, kate)
+		pk, vk, err := plonk.Setup(r1cs, srs)
 		//_, err := plonk.Setup(r1cs, kate, &publicWitness)
 		if err != nil {
 			fmt.Println(err)
@@ -149,7 +149,7 @@ func main() {
 		// public data consists the polynomials describing the constants involved
 		// in the constraints, the polynomial describing the permutation ("grand
 		// product argument"), and the FFT domains.
-		pk, vk, err := plonk.Setup(r1cs, kate)
+		pk, vk, err := plonk.Setup(r1cs, srs)
 		//_, err := plonk.Setup(r1cs, kate, &publicWitness)
 		if err != nil {
 			fmt.Println(err)
