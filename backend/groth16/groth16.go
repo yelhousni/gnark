@@ -186,7 +186,7 @@ func ReadAndVerify(proof Proof, vk VerifyingKey, publicWitness io.Reader) error 
 		return groth16_bls24315.Verify(proof.(*groth16_bls24315.Proof), _vk, w)
 	case *groth16_bw6633.VerifyingKey:
 		w := witness_bw6633.Witness{}
-		if _, err := w.LimitReadFrom(publicWitness, vk.SizePublicWitness()); err != nil {
+		if _, err := w.LimitReadFrom(publicWitness, vk.NbPublicWitness()); err != nil {
 			return err
 		}
 		return groth16_bw6633.Verify(proof.(*groth16_bw6633.Proof), _vk, w)
