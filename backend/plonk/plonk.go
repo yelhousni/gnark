@@ -59,6 +59,7 @@ import (
 	fr_bls12381 "github.com/consensys/gnark-crypto/ecc/bls12-381/fr"
 	fr_bls24315 "github.com/consensys/gnark-crypto/ecc/bls24-315/fr"
 	fr_bn254 "github.com/consensys/gnark-crypto/ecc/bn254/fr"
+	fr_bw6633 "github.com/consensys/gnark-crypto/ecc/bw6-633/fr"
 	fr_bw6761 "github.com/consensys/gnark-crypto/ecc/bw6-761/fr"
 )
 
@@ -128,6 +129,12 @@ func NewSRS(ccs frontend.CompiledConstraintSystem) (kzg.SRS, error) {
 			return nil, err
 		}
 		return kzg_bw6761.NewSRS(kzgSize, alpha)
+	case *cs_bw6633.SparseR1CS:
+		alpha, err := rand.Int(rand.Reader, fr_bw6633.Modulus())
+		if err != nil {
+			return nil, err
+		}
+		return kzg_bw6633.NewSRS(kzgSize, alpha)
 	case *cs_bls24315.SparseR1CS:
 		alpha, err := rand.Int(rand.Reader, fr_bls24315.Modulus())
 		if err != nil {
@@ -277,6 +284,8 @@ func NewCS(curveID ecc.ID) frontend.CompiledConstraintSystem {
 		r1cs = &cs_bls12381.SparseR1CS{}
 	case ecc.BW6_761:
 		r1cs = &cs_bw6761.SparseR1CS{}
+	case ecc.BW6_633:
+		r1cs = &cs_bw6633.SparseR1CS{}
 	case ecc.BLS24_315:
 		r1cs = &cs_bls24315.SparseR1CS{}
 	default:
@@ -298,6 +307,8 @@ func NewProvingKey(curveID ecc.ID) ProvingKey {
 		pk = &plonk_bls12381.ProvingKey{}
 	case ecc.BW6_761:
 		pk = &plonk_bw6761.ProvingKey{}
+	case ecc.BW6_633:
+		pk = &plonk_bw6633.ProvingKey{}
 	case ecc.BLS24_315:
 		pk = &plonk_bls24315.ProvingKey{}
 	default:
@@ -320,6 +331,8 @@ func NewProof(curveID ecc.ID) Proof {
 		proof = &plonk_bls12381.Proof{}
 	case ecc.BW6_761:
 		proof = &plonk_bw6761.Proof{}
+	case ecc.BW6_633:
+		proof = &plonk_bw6633.Proof{}
 	case ecc.BLS24_315:
 		proof = &plonk_bls24315.Proof{}
 	default:
@@ -342,6 +355,8 @@ func NewVerifyingKey(curveID ecc.ID) VerifyingKey {
 		vk = &plonk_bls12381.VerifyingKey{}
 	case ecc.BW6_761:
 		vk = &plonk_bw6761.VerifyingKey{}
+	case ecc.BW6_633:
+		vk = &plonk_bw6633.VerifyingKey{}
 	case ecc.BLS24_315:
 		vk = &plonk_bls24315.VerifyingKey{}
 	default:
@@ -389,6 +404,18 @@ func ReadAndProve(ccs frontend.CompiledConstraintSystem, pk ProvingKey, witness 
 			return nil, err
 		}
 		proof, err := plonk_bls12377.Prove(tccs, _pk, w)
+		if err != nil {
+			return proof, err
+		}
+		return proof, nil
+
+	case *cs_bw6633.SparseR1CS:
+		_pk := pk.(*plonk_bw6633.ProvingKey)
+		w := witness_bw6633.Witness{}
+		if _, err := w.LimitReadFrom(witness, expectedSize); err != nil {
+			return nil, err
+		}
+		proof, err := plonk_bw6633.Prove(tccs, _pk, w)
 		if err != nil {
 			return proof, err
 		}
@@ -452,6 +479,14 @@ func ReadAndVerify(proof Proof, vk VerifyingKey, witness io.Reader) error {
 			return err
 		}
 		return plonk_bls12377.Verify(_proof, _vk, w)
+	case *plonk_bw6633.Proof:
+		_vk := vk.(*plonk_bw6633.VerifyingKey)
+		w := witness_bw6633.Witness{}
+		if _, err := w.LimitReadFrom(witness, expectedSize); err != nil {
+			return err
+		}
+		return plonk_bw6633.Verify(_proof, _vk, w)
+
 
 	case *plonk_bw6761.Proof:
 		_vk := vk.(*plonk_bw6761.VerifyingKey)
