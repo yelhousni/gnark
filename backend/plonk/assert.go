@@ -27,6 +27,7 @@ import (
 	cs_bls24315 "github.com/consensys/gnark/internal/backend/bls24-315/cs"
 	cs_bn254 "github.com/consensys/gnark/internal/backend/bn254/cs"
 	cs_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/cs"
+	cs_bw6672 "github.com/consensys/gnark/internal/backend/bw6-672/cs"
 	cs_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/cs"
 
 	witness_bls12377 "github.com/consensys/gnark/internal/backend/bls12-377/witness"
@@ -34,6 +35,7 @@ import (
 	witness_bls24315 "github.com/consensys/gnark/internal/backend/bls24-315/witness"
 	witness_bn254 "github.com/consensys/gnark/internal/backend/bn254/witness"
 	witness_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/witness"
+	witness_bw6672 "github.com/consensys/gnark/internal/backend/bw6-672/witness"
 	witness_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/witness"
 
 	"github.com/consensys/gnark-crypto/ecc"
@@ -42,6 +44,7 @@ import (
 	kzg_bls24315 "github.com/consensys/gnark-crypto/ecc/bls24-315/fr/kzg"
 	kzg_bn254 "github.com/consensys/gnark-crypto/ecc/bn254/fr/kzg"
 	kzg_bw6633 "github.com/consensys/gnark-crypto/ecc/bw6-633/fr/kzg"
+	kzg_bw6672 "github.com/consensys/gnark-crypto/ecc/bw6-672/fr/kzg"
 	kzg_bw6761 "github.com/consensys/gnark-crypto/ecc/bw6-761/fr/kzg"
 	"github.com/consensys/gnark-crypto/kzg"
 )
@@ -134,6 +137,14 @@ func IsSolved(ccs frontend.CompiledConstraintSystem, witness frontend.Circuit) e
 			return err
 		}
 		return tccs.IsSolved(w)
+	case *cs_bw6672.SparseR1CS:
+		w := witness_bw6672.Witness{}
+		if err := w.FromFullAssignment(witness); err != nil {
+			return err
+		}
+		return tccs.IsSolved(w)
+
+
 	case *cs_bw6633.SparseR1CS:
 		w := witness_bw6633.Witness{}
 		if err := w.FromFullAssignment(witness); err != nil {
@@ -166,6 +177,10 @@ func newKZGSrs(ccs frontend.CompiledConstraintSystem) (kzg.SRS, error) {
 	case *cs_bls24315.SparseR1CS:
 		size := uint64(len(tccs.Constraints) + len(tccs.Assertions) + tccs.NbPublicVariables)
 		return kzg_bls24315.NewSRS(ecc.NextPowerOfTwo(size)+3, fakeRandomness)
+	case *cs_bw6672.SparseR1CS:
+		size := uint64(len(tccs.Constraints) + len(tccs.Assertions) + tccs.NbPublicVariables)
+		return kzg_bw6672.NewSRS(ecc.NextPowerOfTwo(size)+3, fakeRandomness)
+
 	case *cs_bw6633.SparseR1CS:
 		size := uint64(len(tccs.Constraints) + len(tccs.Assertions) + tccs.NbPublicVariables)
 		return kzg_bw6633.NewSRS(ecc.NextPowerOfTwo(size)+3, fakeRandomness)

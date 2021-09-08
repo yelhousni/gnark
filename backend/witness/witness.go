@@ -49,6 +49,7 @@ import (
 	witness_bls24315 "github.com/consensys/gnark/internal/backend/bls24-315/witness"
 	witness_bn254 "github.com/consensys/gnark/internal/backend/bn254/witness"
 	witness_bw6633 "github.com/consensys/gnark/internal/backend/bw6-633/witness"
+	witness_bw6672 "github.com/consensys/gnark/internal/backend/bw6-672/witness"
 	witness_bw6761 "github.com/consensys/gnark/internal/backend/bw6-761/witness"
 
 	"github.com/consensys/gnark/frontend"
@@ -87,6 +88,13 @@ func WriteFullTo(w io.Writer, curveID ecc.ID, witness frontend.Circuit) (int64, 
 			return 0, err
 		}
 		return _witness.WriteTo(w)
+	case ecc.BW6_672:
+		_witness := &witness_bw6672.Witness{}
+		if err := _witness.FromFullAssignment(witness); err != nil {
+			return 0, err
+		}
+		return _witness.WriteTo(w)
+
 	case ecc.BW6_633:
 		_witness := &witness_bw6633.Witness{}
 		if err := _witness.FromFullAssignment(witness); err != nil {
@@ -131,6 +139,13 @@ func WritePublicTo(w io.Writer, curveID ecc.ID, publicWitness frontend.Circuit) 
 			return 0, err
 		}
 		return _witness.WriteTo(w)
+	case ecc.BW6_672:
+		_witness := &witness_bw6672.Witness{}
+		if err := _witness.FromPublicAssignment(publicWitness); err != nil {
+			return 0, err
+		}
+		return _witness.WriteTo(w)
+
 	case ecc.BW6_633:
 		_witness := &witness_bw6633.Witness{}
 		if err := _witness.FromPublicAssignment(publicWitness); err != nil {
