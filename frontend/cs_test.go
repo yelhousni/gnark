@@ -1,7 +1,6 @@
 package frontend
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 
@@ -22,8 +21,8 @@ func TestQuickSort(t *testing.T) {
 	sort.Sort(toSort)
 
 	for i := 0; i < 10; i++ {
-		_, _, cur, _ := toSort[i].Unpack()
-		_, _, next, _ := toSort[i+1].Unpack()
+		_, cur, _ := toSort[i].Unpack()
+		_, next, _ := toSort[i+1].Unpack()
 		if cur >= next {
 			t.Fatal("err sorting linear expression")
 		}
@@ -52,10 +51,6 @@ func TestReduce(t *testing.T) {
 		t.Fatal("Error reduce, duplicate variables not collapsed")
 	}
 
-	// check coefficients
-	for _, t := range toTest.linExp {
-		fmt.Println(cs.coeffs[t.CoeffID()])
-	}
 }
 
 func TestPopVariable(t *testing.T) {

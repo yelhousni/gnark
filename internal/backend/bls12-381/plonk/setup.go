@@ -98,7 +98,15 @@ func Setup(spr *cs.SparseR1CS, srs *kzg.SRS) (*ProvingKey, *VerifyingKey, error)
 	// fft domains
 	sizeSystem := uint64(nbConstraints + nbAssertions + spr.NbPublicVariables) // spr.NbPublicVariables is for the placeholder constraints
 	pk.DomainNum = *fft.NewDomain(sizeSystem, 0, false)
-	pk.DomainH = *fft.NewDomain(4*sizeSystem, 1, false)
+
+	// h, the quotient polynomial is of degree 3(n+1)+2, so it's in a 3(n+2) dim vector space,
+	// the domain is the next power of 2 superior to 3(n+2). 4*domainNum is enough in all cases
+	// except when n<6.
+	if sizeSystem < 6 {
+		pk.DomainH = *fft.NewDomain(8*sizeSystem, 1, false)
+	} else {
+		pk.DomainH = *fft.NewDomain(4*sizeSystem, 1, false)
+	}
 
 	vk.Size = pk.DomainNum.Cardinality
 	vk.SizeInv.SetUint64(vk.Size).Inverse(&vk.SizeInv)
@@ -364,8 +372,8 @@ func (vk *VerifyingKey) InitKZG(srs kzgg.SRS) error {
 	return nil
 }
 
-// SizePublicWitness returns the expected public witness size (number of field elements)
-func (vk *VerifyingKey) SizePublicWitness() int {
+// NbPublicWitness returns the expected public witness size (number of field elements)
+func (vk *VerifyingKey) NbPublicWitness() int {
 	return int(vk.NbPublicVariables)
 }
 

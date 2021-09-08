@@ -40,11 +40,12 @@ import (
 func (cs *ConstraintSystem) Add(i1, i2 interface{}, in ...interface{}) Variable {
 
 	var res Variable
+	res.linExp = make(compiled.LinearExpression, 0, 2+len(in))
 
 	add := func(_i interface{}) {
 		switch t := _i.(type) {
 		case Variable:
-			cs.completeDanglingVariable(&t) // always call this in case of a dangling variable, otherwise compile will not recognize Unset variables
+			t.assertIsSet() // always call this in case of a dangling variable, otherwise compile will not recognize Unset variables
 			res.linExp = append(res.linExp, t.linExp.Clone()...)
 		default:
 			v := cs.Constant(t)
@@ -67,7 +68,7 @@ func (cs *ConstraintSystem) negateLinExp(l compiled.LinearExpression) compiled.L
 	res := make(compiled.LinearExpression, len(l))
 	var coeff, coeffCopy big.Int
 	for i, t := range l {
-		_, coeffID, variableID, constraintVis := t.Unpack()
+		coeffID, variableID, constraintVis := t.Unpack()
 		coeff = cs.coeffs[coeffID]
 		coeffCopy.Neg(&coeff)
 		res[i] = cs.makeTerm(Wire{constraintVis, variableID, nil}, &coeffCopy)
@@ -86,8 +87,8 @@ func (cs *ConstraintSystem) Neg(i interface{}) Variable {
 	default:
 		n := FromInterface(t)
 		n.Neg(&n)
-		if n.Cmp(bOne) == 0 {
-			return cs.getOneVariable()
+		if n.IsUint64() && n.Uint64() == 1 {
+			return cs.one()
 		}
 		res = cs.Constant(n)
 	}
@@ -98,10 +99,11 @@ func (cs *ConstraintSystem) Neg(i interface{}) Variable {
 func (cs *ConstraintSystem) Sub(i1, i2 interface{}) Variable {
 
 	var res Variable
+	res.linExp = make(compiled.LinearExpression, 0, 2)
 
 	switch t := i1.(type) {
 	case Variable:
-		cs.completeDanglingVariable(&t)
+		t.assertIsSet()
 		res.linExp = t.linExp.Clone()
 	default:
 		v := cs.Constant(t)
@@ -110,7 +112,7 @@ func (cs *ConstraintSystem) Sub(i1, i2 interface{}) Variable {
 
 	switch t := i2.(type) {
 	case Variable:
-		cs.completeDanglingVariable(&t)
+		t.assertIsSet()
 		negLinExp := cs.negateLinExp(t.linExp)
 		res.linExp = append(res.linExp, negLinExp...)
 	default:
@@ -126,15 +128,28 @@ func (cs *ConstraintSystem) Sub(i1, i2 interface{}) Variable {
 
 func (cs *ConstraintSystem) mulConstant(i interface{}, v Variable) Variable {
 	var linExp compiled.LinearExpression
+	var newCoeff big.Int
+
 	lambda := FromInterface(i)
+
 	for _, t := range v.linExp {
-		var coeffCopy big.Int
-		_, coeffID, variableID, constraintVis := t.Unpack()
-		coeff := cs.coeffs[coeffID]
-		coeffCopy.Mul(&coeff, &lambda)
-		linExp = append(linExp, cs.makeTerm(Wire{constraintVis, variableID, nil}, &coeffCopy))
+		cID, vID, visibility := t.Unpack()
+		switch cID {
+		case compiled.CoeffIdMinusOne:
+			newCoeff.Neg(&lambda)
+		case compiled.CoeffIdZero:
+			newCoeff.SetUint64(0)
+		case compiled.CoeffIdOne:
+			newCoeff.Set(&lambda)
+		case compiled.CoeffIdTwo:
+			newCoeff.Add(&lambda, &lambda)
+		default:
+			coeff := cs.coeffs[cID]
+			newCoeff.Mul(&coeff, &lambda)
+		}
+		linExp = append(linExp, cs.makeTerm(Wire{visibility, vID, nil}, &newCoeff))
 	}
-	return Variable{Wire{}, linExp, false}
+	return Variable{Wire{}, linExp}
 }
 
 // Mul returns res = i1 * i2 * ... in
@@ -144,10 +159,10 @@ func (cs *ConstraintSystem) Mul(i1, i2 interface{}, in ...interface{}) Variable 
 		var _res Variable
 		switch t1 := _i1.(type) {
 		case Variable:
-			cs.completeDanglingVariable(&t1)
+			t1.assertIsSet()
 			switch t2 := _i2.(type) {
 			case Variable:
-				cs.completeDanglingVariable(&t2)
+				t2.assertIsSet()
 				_res = cs.newInternalVariable() // only in this case we record the constraint in the cs
 				cs.constraints = append(cs.constraints, newR1C(t1, t2, _res))
 				return _res
@@ -158,7 +173,7 @@ func (cs *ConstraintSystem) Mul(i1, i2 interface{}, in ...interface{}) Variable 
 		default:
 			switch t2 := _i2.(type) {
 			case Variable:
-				cs.completeDanglingVariable(&t2)
+				t2.assertIsSet()
 				_res = cs.mulConstant(t1, t2)
 				return _res
 			default:
@@ -184,12 +199,12 @@ func (cs *ConstraintSystem) Mul(i1, i2 interface{}, in ...interface{}) Variable 
 // TODO the function should take an interface
 func (cs *ConstraintSystem) Inverse(v Variable) Variable {
 
-	cs.completeDanglingVariable(&v)
+	v.assertIsSet()
 
 	// allocate resulting variable
 	res := cs.newInternalVariable()
 
-	cs.constraints = append(cs.constraints, newR1C(v, res, cs.getOneVariable()))
+	cs.constraints = append(cs.constraints, newR1C(v, res, cs.one()))
 
 	return res
 }
@@ -203,10 +218,10 @@ func (cs *ConstraintSystem) Div(i1, i2 interface{}) Variable {
 	// O
 	switch t1 := i1.(type) {
 	case Variable:
-		cs.completeDanglingVariable(&t1)
+		t1.assertIsSet()
 		switch t2 := i2.(type) {
 		case Variable:
-			cs.completeDanglingVariable(&t2)
+			t2.assertIsSet()
 			cs.constraints = append(cs.constraints, newR1C(t2, res, t1))
 		default:
 			tmp := cs.Constant(t2)
@@ -215,7 +230,7 @@ func (cs *ConstraintSystem) Div(i1, i2 interface{}) Variable {
 	default:
 		switch t2 := i2.(type) {
 		case Variable:
-			cs.completeDanglingVariable(&t2)
+			t2.assertIsSet()
 			tmp := cs.Constant(t1)
 			cs.constraints = append(cs.constraints, newR1C(t2, res, tmp))
 		default:
@@ -231,8 +246,8 @@ func (cs *ConstraintSystem) Div(i1, i2 interface{}) Variable {
 // Xor compute the XOR between two variables
 func (cs *ConstraintSystem) Xor(a, b Variable) Variable {
 
-	cs.completeDanglingVariable(&a)
-	cs.completeDanglingVariable(&b)
+	a.assertIsSet()
+	b.assertIsSet()
 
 	cs.AssertIsBoolean(a)
 	cs.AssertIsBoolean(b)
@@ -250,8 +265,8 @@ func (cs *ConstraintSystem) Xor(a, b Variable) Variable {
 // Or compute the OR between two variables
 func (cs *ConstraintSystem) Or(a, b Variable) Variable {
 
-	cs.completeDanglingVariable(&a)
-	cs.completeDanglingVariable(&b)
+	a.assertIsSet()
+	b.assertIsSet()
 
 	cs.AssertIsBoolean(a)
 	cs.AssertIsBoolean(b)
@@ -268,8 +283,8 @@ func (cs *ConstraintSystem) Or(a, b Variable) Variable {
 // And compute the AND between two variables
 func (cs *ConstraintSystem) And(a, b Variable) Variable {
 
-	cs.completeDanglingVariable(&a)
-	cs.completeDanglingVariable(&b)
+	a.assertIsSet()
+	b.assertIsSet()
 
 	cs.AssertIsBoolean(a)
 	cs.AssertIsBoolean(b)
@@ -318,61 +333,56 @@ func (cs *ConstraintSystem) IsZero(a Variable, id ecc.ID) Variable {
 //
 // The result in in little endian (first bit= lsb)
 func (cs *ConstraintSystem) ToBinary(a Variable, nbBits int) []Variable {
+	// ensure a is set
+	a.assertIsSet()
 
-	cs.completeDanglingVariable(&a)
-
-	// allocate the resulting variables
-	res := make([]Variable, nbBits)
+	// allocate the resulting variables and bit-constraint them
+	b := make([]Variable, nbBits)
 	for i := 0; i < nbBits; i++ {
-		res[i] = cs.newInternalVariable()
-		cs.AssertIsBoolean(res[i])
+		b[i] = cs.newInternalVariable()
+		cs.AssertIsBoolean(b[i])
 	}
 
-	var coeff big.Int
-	coeff.Set(bTwo)
+	// here what we do is we add a single constraint where
+	// Σ (2**i * b[i]) == a
+	var c big.Int
+	c.Set(bOne)
 
-	var v, _v Variable
-	v = cs.Mul(res[0], 1) // no constraint is recorded
+	var Σbi Variable
+	Σbi.linExp = make(compiled.LinearExpression, nbBits)
 
-	// add the constraint
-	for i := 1; i < nbBits; i++ {
-		_v = cs.Mul(coeff, res[i]) // no constraint is recorded
-		v = cs.Add(v, _v)          // no constraint is recorded
-		coeff.Mul(&coeff, bTwo)
+	for i := 0; i < nbBits; i++ {
+		Σbi.linExp[i] = cs.makeTerm(Wire{compiled.Internal, b[i].id, nil}, &c)
+		c.Lsh(&c, 1)
 	}
 
-	one := cs.getOneVariable()
-
-	cs.constraints = append(cs.constraints, newR1C(v, one, a, compiled.BinaryDec))
-
-	return res
+	// record the constraint Σ (2**i * b[i]) == a
+	cs.constraints = append(cs.constraints, newR1C(Σbi, cs.one(), a, compiled.BinaryDec))
+	return b
 
 }
 
 // FromBinary packs b, seen as a fr.Element in little endian
 func (cs *ConstraintSystem) FromBinary(b ...Variable) Variable {
-
+	// ensure inputs are set
 	for i := 0; i < len(b); i++ {
-		cs.completeDanglingVariable(&b[i])
+		b[i].assertIsSet()
 	}
+
+	// res = Σ (2**i * b[i])
 
 	var res, v Variable
 	res = cs.Constant(0) // no constraint is recorded
 
-	var coeff big.Int
+	var c big.Int
+	c.Set(bOne)
 
 	L := make(compiled.LinearExpression, len(b))
 	for i := 0; i < len(L); i++ {
-		if i == 0 {
-			coeff.Set(bOne)
-		} else if i == 1 {
-			coeff.Set(bTwo)
-		} else {
-			coeff.Mul(&coeff, bTwo)
-		}
-		v = cs.Mul(coeff, b[i])  // no constraint is recorded
+		v = cs.Mul(c, b[i])      // no constraint is recorded
 		res = cs.Add(v, res)     // no constraint is recorded
 		cs.AssertIsBoolean(b[i]) // ensures the b[i]'s are boolean
+		c.Lsh(&c, 1)
 	}
 
 	return res
@@ -381,7 +391,7 @@ func (cs *ConstraintSystem) FromBinary(b ...Variable) Variable {
 // Select if b is true, yields i1 else yields i2
 func (cs *ConstraintSystem) Select(b Variable, i1, i2 interface{}) Variable {
 
-	cs.completeDanglingVariable(&b)
+	b.assertIsSet()
 
 	// ensures that b is boolean
 	cs.AssertIsBoolean(b)
@@ -390,7 +400,7 @@ func (cs *ConstraintSystem) Select(b Variable, i1, i2 interface{}) Variable {
 
 	switch t1 := i1.(type) {
 	case Variable:
-		cs.completeDanglingVariable(&t1)
+		t1.assertIsSet()
 		res = cs.newInternalVariable()
 		v := cs.Sub(t1, i2)  // no constraint is recorded
 		w := cs.Sub(res, i2) // no constraint is recorded
@@ -400,7 +410,7 @@ func (cs *ConstraintSystem) Select(b Variable, i1, i2 interface{}) Variable {
 	default:
 		switch t2 := i2.(type) {
 		case Variable:
-			cs.completeDanglingVariable(&t2)
+			t2.assertIsSet()
 			res = cs.newInternalVariable()
 			v := cs.Sub(t1, t2)  // no constraint is recorded
 			w := cs.Sub(res, t2) // no constraint is recorded
@@ -425,14 +435,17 @@ func (cs *ConstraintSystem) Constant(input interface{}) Variable {
 
 	switch t := input.(type) {
 	case Variable:
-		cs.completeDanglingVariable(&t)
+		t.assertIsSet()
 		return t
 	default:
 		n := FromInterface(t)
-		if n.Cmp(bOne) == 0 {
-			return cs.getOneVariable()
+		if n.IsUint64() && n.Uint64() == 1 {
+			return cs.one()
 		}
-		return cs.mulConstant(n, cs.getOneVariable())
+		// cs.mulConstant(n, cs.one())
+		return Variable{Wire{}, compiled.LinearExpression{
+			cs.makeTerm(Wire{compiled.Public, 0, nil}, &n),
+		}}
 	}
 }
 
@@ -471,6 +484,7 @@ func (cs *ConstraintSystem) AssertIsEqual(i1, i2 interface{}) {
 	r := cs.Constant(1)  // no constraint is recorded
 	o := cs.Constant(i2) // no constraint is recorded
 
+	// build log
 	var sbb strings.Builder
 	sbb.WriteString("[")
 	lhs := cs.buildLogEntryFromVariable(l)
@@ -481,32 +495,59 @@ func (cs *ConstraintSystem) AssertIsEqual(i1, i2 interface{}) {
 	sbb.WriteString(rhs.format)
 	debugInfo.toResolve = append(debugInfo.toResolve, rhs.toResolve...)
 	sbb.WriteString("]")
+
+	// get call stack
+	sbb.WriteString("error AssertIsEqual")
+	stack := getCallStack()
+	for i := 0; i < len(stack); i++ {
+		sbb.WriteByte('\n')
+		sbb.WriteString(stack[i])
+	}
 	debugInfo.format = sbb.String()
 
 	cs.addAssertion(newR1C(l, r, o), debugInfo)
 }
 
+// markBoolean marks the variable as boolean and return true
+// if a constraint was added, false if the variable was already
+// constrained as a boolean
+func (cs *ConstraintSystem) markBoolean(v Variable) bool {
+	switch v.visibility {
+	case compiled.Internal:
+		if _, ok := cs.internal.booleans[v.id]; ok {
+			return false
+		}
+		cs.internal.booleans[v.id] = struct{}{}
+	case compiled.Secret:
+		if _, ok := cs.secret.booleans[v.id]; ok {
+			return false
+		}
+		cs.secret.booleans[v.id] = struct{}{}
+	case compiled.Public:
+		if _, ok := cs.public.booleans[v.id]; ok {
+			return false
+		}
+		cs.public.booleans[v.id] = struct{}{}
+	default:
+		panic("not implemented")
+	}
+	return true
+}
+
 // AssertIsBoolean adds an assertion in the constraint system (v == 0 || v == 1)
 func (cs *ConstraintSystem) AssertIsBoolean(v Variable) {
 
-	cs.completeDanglingVariable(&v)
+	v.assertIsSet()
 
-	if v.isBoolean {
-		return
+	if !cs.markBoolean(v) {
+		return // variable is already constrained
 	}
 
 	_v := cs.Sub(1, v)  // no variable is recorded in the cs
 	o := cs.Constant(0) // no variable is recorded in the cs
-	v.isBoolean = true
 
 	// prepare debug info to be displayed in case the constraint is not solved
-	// debugInfo := logEntry{
-	// 	format:    fmt.Sprintf("%%s == (0 or 1)"),
-	// 	toResolve: []compiled.Term{compiled.Pack(v.id, 0, v.visibility)},
-	// }
-	// stack := getCallStack()
 	debugInfo := logEntry{
-		// format:    "error AssertIsBoolean",
 		toResolve: nil,
 	}
 	var sbb strings.Builder
@@ -529,11 +570,11 @@ func (cs *ConstraintSystem) AssertIsBoolean(v Variable) {
 // https://github.com/zcash/zips/blOoutputb/master/protocol/protocol.pdf
 func (cs *ConstraintSystem) AssertIsLessOrEqual(v Variable, bound interface{}) {
 
-	cs.completeDanglingVariable(&v)
+	v.assertIsSet()
 
 	switch b := bound.(type) {
 	case Variable:
-		cs.completeDanglingVariable(&b)
+		b.assertIsSet()
 		cs.mustBeLessOrEqVar(v, b)
 	default:
 		cs.mustBeLessOrEqCst(v, FromInterface(b))
@@ -578,7 +619,7 @@ func (cs *ConstraintSystem) mustBeLessOrEqVar(w, bound Variable) {
 		p[i] = cs.Select(binbound[i], p1, p[i+1])
 		t := cs.Select(binbound[i], zero, p[i+1])
 
-		l := cs.getOneVariable()
+		l := cs.one()
 		l = cs.Sub(l, t)       // no constraint is recorded
 		l = cs.Sub(l, binw[i]) // no constraint is recorded
 
@@ -633,7 +674,7 @@ func (cs *ConstraintSystem) mustBeLessOrEqCst(v Variable, bound big.Int) {
 			if b == 0 {
 				p[(i+1)*wordSize-1-j] = p[(i+1)*wordSize-j]
 
-				l := cs.getOneVariable()
+				l := cs.one()
 				l = cs.Sub(l, p[(i+1)*wordSize-j])       // no constraint is recorded
 				l = cs.Sub(l, vBits[(i+1)*wordSize-1-j]) // no constraint is recorded
 
