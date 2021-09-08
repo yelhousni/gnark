@@ -192,13 +192,9 @@ func (cs *ConstraintSystem) toSparseR1CS(curveID ecc.ID) (CompiledConstraintSyst
 	case ecc.BW6_761:
 		return bw6761r1cs.NewSparseR1CS(res.ccs, cs.coeffs), nil
 	case ecc.BLS24_315:
-<<<<<<< HEAD
-		return bls24315r1cs.NewSparseR1CS(res, res.Coeffs), nil
-	case ecc.BW6_633:
-		return bw6633r1cs.NewSparseR1CS(res, res.Coeffs), nil
-=======
 		return bls24315r1cs.NewSparseR1CS(res.ccs, cs.coeffs), nil
->>>>>>> master
+	case ecc.BW6_633:
+		return bw6633r1cs.NewSparseR1CS(res.ccs, cs.coeffs), nil
 	case ecc.UNKNOWN:
 		// TODO cleanup ? why does this path exists?
 		return &res.ccs, nil
